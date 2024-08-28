@@ -56,7 +56,9 @@ void FeaturePipeline::AcceptWaveform(const int16_t* pcm, const int size) {
 }
 
 void FeaturePipeline::set_input_finished() {
-  CHECK(!input_finished_);
+  if (input_finished_ == true) {
+    return;
+  }
   {
     std::lock_guard<std::mutex> lock(mutex_);
     input_finished_ = true;

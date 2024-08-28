@@ -24,13 +24,20 @@
 #include "utils/utils.h"
 
 namespace wenet {
-
 // Split the UTF-8 string into unit ids according to unit_table
 bool SplitContextToUnits(const std::string& context,
                          const std::shared_ptr<fst::SymbolTable>& unit_table,
                          std::vector<int>* units) {
+  LOG(INFO) << "SplitContextToUnits - Starting split operation.";
+  LOG(INFO) << "Original context: " << context;
+
   std::vector<std::string> chars;
   SplitUTF8StringToChars(context, &chars);
+  
+  // Log the split context
+  //std::string charsStr = "";
+  //for (const auto& c : chars) charsStr += c + ", ";
+  //LOG(INFO) << "Context split into chars: [" << charsStr << "]";
 
   bool no_oov = true;
   bool beginning = true;
@@ -40,14 +47,14 @@ bool SplitContextToUnits(const std::string& context,
       for (size_t i = start; i < end; i++) {
         unit += chars[i];
       }
-      // Add '▁' at the beginning of English word.
-      // TODO(zhendong.peng): Support bpe model
       if (IsAlpha(unit) && beginning) {
         unit = kSpaceSymbol + unit;
+        //LOG(INFO) << "Added space symbol at the beginning of an English word: " << unit;
       }
 
       int unit_id = unit_table->Find(unit);
       if (unit_id != -1) {
+        //LOG(INFO) << "Unit identified: " << unit << " with ID " << unit_id;
         units->emplace_back(unit_id);
         start = end;
         beginning = false;
@@ -55,7 +62,6 @@ bool SplitContextToUnits(const std::string& context,
       }
 
       if (end == start + 1) {
-        // Matching using '▁' separately for English
         if (unit[0] == kSpaceSymbol[0]) {
           units->emplace_back(unit_table->Find(kSpaceSymbol));
           beginning = false;
@@ -71,6 +77,9 @@ bool SplitContextToUnits(const std::string& context,
       }
     }
   }
+
+  LOG(INFO) << "SplitContextToUnits - Split operation completed.";
+  LOG(INFO) << "NO OOV: " << (no_oov ? "true" : "false");
   return no_oov;
 }
 

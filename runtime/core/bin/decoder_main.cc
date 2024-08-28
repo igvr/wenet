@@ -85,6 +85,9 @@ void Decode(std::pair<std::string, std::string> wav, bool warmup = false) {
     if (state == wenet::DecodeState::kEndFeats) {
       break;
     } else if (FLAGS_chunk_size > 0 && FLAGS_simulate_streaming) {
+      std::this_thread::sleep_for(
+          std::chrono::milliseconds(static_cast<int>(1000)));
+
       float frame_shift_in_ms =
           static_cast<float>(g_feature_config->frame_shift) /
           wav_reader.sample_rate() * 1000;
@@ -94,7 +97,7 @@ void Decode(std::pair<std::string, std::string> wav, bool warmup = false) {
       if (wait_time > 0) {
         LOG(INFO) << "Simulate streaming, waiting for " << wait_time << "ms";
         std::this_thread::sleep_for(
-            std::chrono::milliseconds(static_cast<int>(wait_time)));
+            std::chrono::milliseconds(static_cast<int>(300)));
       }
     }
   }

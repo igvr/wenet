@@ -15,6 +15,7 @@
 #ifndef WEBSOCKET_WEBSOCKET_CLIENT_H_
 #define WEBSOCKET_WEBSOCKET_CLIENT_H_
 
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -38,7 +39,8 @@ using tcp = boost::asio::ip::tcp;        // from <boost/asio/ip/tcp.hpp>
 class WebSocketClient {
  public:
   WebSocketClient(const std::string& host, int port);
-  int sample_rate_;
+  using MessageCallback = std::function<void(const std::string&)>;
+
   void SendTextData(const std::string& data);
   void SendBinaryData(const void* data, size_t size);
   void ReadLoopFunc();
@@ -47,11 +49,13 @@ class WebSocketClient {
   void SendStartSignal();
   void SendEndSignal();
   void set_nbest(int nbest) { nbest_ = nbest; }
-  void set_sr(int sr) { sample_rate_ = sr; }
   void set_continuous_decoding(bool continuous_decoding) {
     continuous_decoding_ = continuous_decoding;
   }
   bool done() const { return done_; }
+  void SetMessageCallback(const MessageCallback& callback) {
+    message_callback_ = callback;
+  }
 
  private:
   void Connect();
@@ -63,6 +67,7 @@ class WebSocketClient {
   asio::io_context ioc_;
   websocket::stream<tcp::socket> ws_{ioc_};
   std::unique_ptr<std::thread> t_{nullptr};
+  MessageCallback message_callback_;
 
   WENET_DISALLOW_COPY_AND_ASSIGN(WebSocketClient);
 };

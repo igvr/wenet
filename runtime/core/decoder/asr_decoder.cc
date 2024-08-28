@@ -62,6 +62,7 @@ void AsrDecoder::Reset() {
   searcher_->Reset();
   feature_pipeline_->Reset();
   ctc_endpointer_->Reset();
+              VLOG(3) << "----- Reset -----";
 }
 
 void AsrDecoder::ResetContinuousDecoding() {
@@ -71,6 +72,7 @@ void AsrDecoder::ResetContinuousDecoding() {
   model_->Reset();
   searcher_->Reset();
   ctc_endpointer_->Reset();
+              VLOG(3) << "----- ResetContinuousDecoding -----" << num_frames_;
 }
 
 DecodeState AsrDecoder::Decode(bool block) {
@@ -93,10 +95,12 @@ DecodeState AsrDecoder::AdvanceDecoding(bool block) {
   // Return immediately if we do not want to block
   if (!block && !feature_pipeline_->input_finished() &&
       feature_pipeline_->NumQueuedFrames() < num_required_frames) {
+            VLOG(3) << "kWaitFeats!";
     return DecodeState::kWaitFeats;
   }
   // If not okay, that means we reach the end of the input
   if (!feature_pipeline_->Read(num_required_frames, &chunk_feats)) {
+    VLOG(3) << "kEndFeats!";
     state = DecodeState::kEndFeats;
   }
 
@@ -161,7 +165,7 @@ void AsrDecoder::UpdateResult(bool finish) {
     // various FST operations when building the decoding graph. So here we use
     // time stamp of the input(e2e model unit), which is more accurate, and it
     // requires the symbol table of the e2e model used in training.
-    if (unit_table_ != nullptr && finish) {
+    if (unit_table_ != nullptr && finish && false) {
       const std::vector<int>& input = inputs[i];
       const std::vector<int>& time_stamp = times[i];
       CHECK_EQ(input.size(), time_stamp.size());
@@ -197,7 +201,11 @@ void AsrDecoder::UpdateResult(bool finish) {
   }
 
   if (DecodedSomething()) {
-    VLOG(1) << "Partial CTC result " << result_[0].sentence;
+    if (finish) {
+      VLOG(1) << "Final CTC result " << result_[0].sentence;
+    } else {
+      VLOG(2) << "Partial CTC result " << result_[0].sentence;
+    }
     if (context_graph_ != nullptr) {
       int cur_state = 0;
       float score = 0;

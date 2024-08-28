@@ -34,7 +34,6 @@ struct CtcEndpointRule {
 struct CtcEndpointConfig {
   /// We consider blank as silence for purposes of endpointing.
   int blank = 0;                // blank id
-  float blank_scale = 1.0;      // blank scale
   float blank_threshold = 0.8;  // blank threshold to be silence
   /// We support three rules. We terminate decoding if ANY of these rules
   /// evaluates to "true". If you want to add more rules, do it by changing this
@@ -50,7 +49,7 @@ struct CtcEndpointConfig {
   CtcEndpointRule rule3;
 
   CtcEndpointConfig()
-      : rule1(false, 5000, 0), rule2(true, 1000, 0), rule3(false, 0, 20000) {}
+      : rule1(false, 9999, 0), rule2(true, 9999, 0), rule3(false, 9999, 20000) {}
 };
 
 class CtcEndpoint {

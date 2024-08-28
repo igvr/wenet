@@ -1,5 +1,16 @@
+find_package(SDL2 REQUIRED)
+
+# Include SDL2 include directories
+include_directories(${SDL2_INCLUDE_DIRS})
+
 add_executable(decoder_main decoder_main.cc)
+# add_executable(testies_main testies_main.cc)
+
+# Link the decoder library
 target_link_libraries(decoder_main PUBLIC decoder)
+# target_link_libraries(testies_main PUBLIC testies)
+
+
 if(IPEX)
   target_link_libraries(decoder_main PUBLIC "${TORCH_IPEX_LIBRARIES}")
 endif()
@@ -13,8 +24,6 @@ if(TORCH)
 endif()
 
 if(WEBSOCKET)
-  add_executable(websocket_client_main websocket_client_main.cc)
-  target_link_libraries(websocket_client_main PUBLIC websocket)
   add_executable(websocket_server_main websocket_server_main.cc)
   target_link_libraries(websocket_server_main PUBLIC websocket)
 endif()

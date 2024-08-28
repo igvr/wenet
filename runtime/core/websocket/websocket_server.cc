@@ -42,6 +42,7 @@ ConnectionHandler::ConnectionHandler(
 void ConnectionHandler::OnSpeechStart() {
   LOG(INFO) << "Received speech start signal, start reading speech";
   got_start_tag_ = true;
+  audio_buffer_.clear();
   json::value rv = {{"status", "ok"}, {"type", "server_ready"}};
   ws_.text(true);
   ws_.write(asio::buffer(json::serialize(rv)));
@@ -59,6 +60,17 @@ void ConnectionHandler::OnSpeechEnd() {
     feature_pipeline_->set_input_finished();
   }
   got_end_tag_ = true;
+  if (!audio_buffer_.empty()) {
+    // Determine the filename using the current timestamp
+    std::string filename = std::to_string(std::time(nullptr)) + ".wav";
+    // Configure wav_writer
+    if (audio_writer_.open(filename, /* sample_rate */ 16000,
+                           /* bits_per_sample */ 16, /* channels */ 1)) {
+      audio_writer_.write(audio_buffer_.data(), audio_buffer_.size());
+      audio_writer_.close();
+      audio_buffer_.clear(); // why segfault without this
+    }
+  }
 }
 
 void ConnectionHandler::OnPartialResult(const std::string& result) {
@@ -92,6 +104,7 @@ void ConnectionHandler::OnSpeechData(const beast::flat_buffer& buffer) {
   CHECK(decoder_ != nullptr);
   const auto* pcm_data = static_cast<const int16_t*>(buffer.data().data());
   feature_pipeline_->AcceptWaveform(pcm_data, num_samples);
+  //audio_buffer_.insert(audio_buffer_.end(), pcm_data, pcm_data + num_samples);
 }
 
 std::string ConnectionHandler::SerializeResult(bool finish) {
@@ -125,9 +138,14 @@ void ConnectionHandler::DecodeThreadFunc() {
         decoder_->Rescoring();
         std::string result = SerializeResult(true);
         OnFinalResult(result);
-        OnFinish();
-        stop_recognition_ = true;
-        break;
+        if (continuous_decoding_) {
+          feature_pipeline_->Reset();
+          decoder_->ResetContinuousDecoding();
+        } else {
+          OnFinish();
+          stop_recognition_ = true;
+          break;
+        }
       } else if (state == DecodeState::kEndpoint) {
         decoder_->Rescoring();
         std::string result = SerializeResult(true);
@@ -211,9 +229,9 @@ void ConnectionHandler::operator()() {
         std::string message = beast::buffers_to_string(buffer.data());
         LOG(INFO) << message;
         OnText(message);
-        if (got_end_tag_) {
-          break;
-        }
+        // if (got_end_tag_) {
+        //   break;
+        // }
       } else {
         if (!got_start_tag_) {
           OnError("Start signal is expected before binary data");

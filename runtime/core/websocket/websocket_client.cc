@@ -66,6 +66,10 @@ void WebSocketClient::ReadLoopFunc() {
       std::string message = beast::buffers_to_string(buffer.data());
       LOG(INFO) << message;
       CHECK(ws_.got_text());
+      // Invoke the callback if it's set
+      if (message_callback_) {
+        message_callback_(message);
+      }
       json::object obj = json::parse(message).as_object();
       if (obj["status"] != "ok") {
         break;

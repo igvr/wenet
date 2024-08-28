@@ -26,6 +26,7 @@
 #include "boost/beast/core.hpp"
 #include "boost/beast/websocket.hpp"
 
+#include "utils/wav_writer.h"
 #include "decoder/asr_decoder.h"
 #include "frontend/feature_pipeline.h"
 #include "utils/log.h"
@@ -58,6 +59,9 @@ class ConnectionHandler {
   void DecodeThreadFunc();
   std::string SerializeResult(bool finish);
 
+  std::vector<int16_t> audio_buffer_;  // Buffer for audio data
+  wav_writer audio_writer_;            // Instance of wav_writer
+
   bool continuous_decoding_ = false;
   int nbest_ = 1;
   websocket::stream<tcp::socket> ws_;
@@ -72,6 +76,7 @@ class ConnectionHandler {
   std::shared_ptr<FeaturePipeline> feature_pipeline_ = nullptr;
   std::shared_ptr<AsrDecoder> decoder_ = nullptr;
   std::shared_ptr<std::thread> decode_thread_ = nullptr;
+
 };
 
 class WebSocketServer {
