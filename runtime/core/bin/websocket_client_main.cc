@@ -19,6 +19,7 @@
 #include "utils/common_sdl.h"
 #include "utils/flags.h"
 #include "utils/timer.h"
+#include "utils/wav_writer.h"
 #include "websocket/websocket_client.h"
 
 namespace beast = boost::beast;
@@ -146,7 +147,7 @@ class BroadcastServer {
 };
 
 class VadIterator {
- private:
+ public:
   Ort::Env env;
   Ort::SessionOptions session_options;
   std::shared_ptr<Ort::Session> session = nullptr;
@@ -264,6 +265,7 @@ DEFINE_string(wav_path, "", "test wav file path");
 DEFINE_bool(continuous_decoding, false, "continuous decoding mode");
 DEFINE_int32(device, -1, "audio device id");
 DEFINE_bool(save_audio, false, "save audio to wav file");
+DEFINE_double(vad_threshold, 0.5, "vad threshold");
 
 int main(int argc, char* argv[]) {
   boost::asio::io_context io_context;
@@ -293,10 +295,9 @@ int main(int argc, char* argv[]) {
 
   const int sample_rate = 16000;
   std::wstring path = L"silero_vad.onnx";
-  VadIterator vad(path);
+  VadIterator vad(path, sample_rate, 64, FLAGS_vad_threshold);
 
   if (FLAGS_wav_path.empty()) {
-    wenet::Timer timer;
     wav_writer wavWriter;
 
     // Save WAV file if required
@@ -315,35 +316,29 @@ int main(int argc, char* argv[]) {
       SDL_Quit();
       return 1;
     }
-    audio.resume();
 
+    audio.resume();
     bool is_running = true;
     bool is_speech = false;
     std::vector<int16_t> audio_data;
     std::vector<int16_t> excess_data;
     int desired_frame_count = 1024;
-    const int N = 5;  // Adjust N according to your needs
+    const int N = 4;
     std::vector<int16_t> pre_speech_buffer;
-    auto desired_interval = std::chrono::milliseconds(64);
+    auto desired_interval_ms = std::chrono::milliseconds(64);
     std::chrono::high_resolution_clock::time_point last_data_time =
         std::chrono::high_resolution_clock::now();
 
     while (is_running) {
       is_running = sdl_poll_events();
-
       audio.get(audio_data);
 
-      // If no audio data, continue without updating last_data_time
       if (audio_data.empty()) {
-        // VLOG(2) << "--------------";
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
         continue;
       }
 
       last_data_time = std::chrono::high_resolution_clock::now();
-      // VLOG(2) << "Audio size: " << audio_data.size();
-
-      // for every 1024 send 1024 if vad is true
       for (int i = 0; i < audio_data.size(); i += desired_frame_count) {
         if (i + desired_frame_count > audio_data.size()) {
           break;
@@ -359,27 +354,53 @@ int main(int argc, char* argv[]) {
           is_speech = true;
           // VLOG(2) << "Speech detected";
           if (!pre_speech_buffer.empty()) {
+            VLOG(2) << "Sending pre-speech buffer: " << pre_speech_buffer.size();
+            client.SendBinaryData(pre_speech_buffer.data(),
+                                  pre_speech_buffer.size() * sizeof(int16_t));
             if (FLAGS_save_audio) {
               wavWriter.write(pre_speech_buffer.data(),
                               pre_speech_buffer.size());
             }
-
-            client.SendBinaryData(pre_speech_buffer.data(),
-                                  pre_speech_buffer.size() * sizeof(int16_t));
             pre_speech_buffer.clear();
           }
+
+          VLOG(2) << "Sending speech data: " << i;
+          client.SendBinaryData(audio_data.data() + i,
+                                desired_frame_count * sizeof(int16_t));
 
           if (FLAGS_save_audio) {
             wavWriter.write(audio_data.data() + i, desired_frame_count);
           }
-          client.SendBinaryData(audio_data.data() + i,
-                                desired_frame_count * sizeof(int16_t));
+
         } else {
           if (is_speech) {
+            // Detected end of speech
+            std::vector<int16_t> end_of_speech_buffer(
+                audio_data.begin() + i,
+                audio_data.begin() + i + desired_frame_count);
+
+            // Append 1024 empty samples to the end of speech data
+            std::vector<int16_t> empty_samples(1024,
+                                               0);  // 1024 samples of silence
+            end_of_speech_buffer.insert(end_of_speech_buffer.end(),
+                                        empty_samples.begin(),
+                                        empty_samples.end());
+
+            // Send the end of speech data with the empty samples appended
+            client.SendBinaryData(
+                end_of_speech_buffer.data(),
+                end_of_speech_buffer.size() * sizeof(int16_t));
+
+            if (FLAGS_save_audio) {
+              wavWriter.write(end_of_speech_buffer.data(),
+                              end_of_speech_buffer.size());
+            }
+
             client.SendEndSignal();
             is_speech = false;
           }
           // VLOG(2) << "Silence detected";
+          // VLOG(2) << "Pre-speech buffer size: " << pre_speech_buffer.size();
           std::vector<int16_t> temp;
           int buffer_size = N * desired_frame_count;
           int start_index =
@@ -409,7 +430,7 @@ int main(int argc, char* argv[]) {
       std::chrono::duration<double, std::milli> time_diff =
           now - last_data_time;
 
-      auto time_to_wait = desired_interval - time_diff;
+      auto time_to_wait = desired_interval_ms - time_diff;
       // VLOG(2) << "sleeping " << time_to_wait.count() << "ms";
       if (time_to_wait > std::chrono::milliseconds(0)) {
         std::this_thread::sleep_for(time_to_wait);
@@ -421,7 +442,7 @@ int main(int argc, char* argv[]) {
     CHECK_EQ(wav_reader.sample_rate(), sample_rate);
     const int num_samples = wav_reader.num_samples();
     // Send data every 0.5 second
-    const float interval = 0.5;
+    const float interval = 0.064;
     const int sample_interval = interval * sample_rate;
     for (int start = 0; start < num_samples; start += sample_interval) {
       if (client.done()) {
@@ -439,7 +460,7 @@ int main(int argc, char* argv[]) {
       client.SendBinaryData(data.data(), data.size() * sizeof(int16_t));
       VLOG(2) << "Send " << data.size() << " samples";
       std::this_thread::sleep_for(
-          std::chrono::milliseconds(static_cast<int>(interval * 1000)));
+          std::chrono::milliseconds(static_cast<int>(64)));
     }
     wenet::Timer timer;
     client.SendEndSignal();
