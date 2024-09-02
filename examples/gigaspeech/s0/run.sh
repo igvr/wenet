@@ -16,7 +16,7 @@ fi
 # if you don't want to utilize all available GPU resources.
 export CUDA_VISIBLE_DEVICES="${gpu_list}"
 echo "CUDA_VISIBLE_DEVICES is ${CUDA_VISIBLE_DEVICES}"
-stage=0 # start from 0 if you need to start from data preparation
+stage=4 # start from 0 if you need to start from data preparation
 stop_stage=5
 
 # You should change the following two parameters for multiple machine training,
@@ -31,19 +31,21 @@ giga_data_dir=/export/expts6/corpus/data/en-asr-data/16k/GigaSpeech
 shards_dir=/ssd/nfs06/unified_data/giga_shards
 # gigaspeech training set
 set=XL
-train_set=train_`echo $set |tr 'A-Z' 'a-z'`
-train_dev=dev
-recog_set=test
+train_set=finetune/train
+dev_set=finetune/dev
+recog_set=finetune/dev  # We'll use dev set for recognition as we don't have a separate test set
 # wav data dir
 data=data
 nj=16
 # Optional train_config
 # 1. conf/train_transformer.yaml: Standard Conformer
 # 2. conf/train_transformer_bidecoder.yaml: Bidecoder Conformer
-train_config=conf/train_conformer_bidecoder.yaml
-checkpoint=
+cmvn_file=exp/finetune_gigaspeech/pretrainedmodel/global_cmvn
+train_config=exp/finetune_gigaspeech/pretrainedmodel/train.yaml
+checkpoint=exp/finetune_gigaspeech/pretrainedmodel/final.pt
 do_delta=false
-dir=exp/sp_spec_aug
+dir=exp/finetune_gigaspeech
+
 
 # use average_checkpoint will get better result
 average_checkpoint=true
@@ -102,8 +104,8 @@ if [ ${stage} -le 1 ] && [ ${stop_stage} -ge 1 ]; then
 fi
 
 
-dict=$data/lang_char_$set/${train_set}_${bpemode}${nbpe}_units.txt
-bpemodel=$data/lang_char_$set/${train_set}_${bpemode}${nbpe}
+dict=exp/finetune_gigaspeech/pretrainedmodel/units.txt
+bpemodel=exp/finetune_gigaspeech/pretrainedmodel/train_xl_unigram5000
 echo "dictionary: ${dict}"
 if [ ${stage} -le 2 ] && [ ${stop_stage} -ge 2 ]; then
   ### Task dependent. You have to check non-linguistic symbols used in the corpus.
@@ -139,6 +141,14 @@ if [ ${stage} -le 3 ] && [ ${stop_stage} -ge 3 ]; then
   done
 fi
 
+
+sed -i 's/^max_epoch:.*/max_epoch: 200/' $train_config
+sed -i 's/^lr:.*/lr: 0.0001/' $train_config
+
+# Add these lines before the training command
+tensorboard_dir=$dir/tensorboard
+
+
 if [ ${stage} -le 4 ] && [ ${stop_stage} -ge 4 ]; then
   # Training
   mkdir -p $dir
@@ -158,14 +168,15 @@ if [ ${stage} -le 4 ] && [ ${stop_stage} -ge 4 ]; then
            --rdzv_id=2023 --rdzv_backend="c10d" \
     wenet/bin/train.py \
       --config $train_config \
-      --data_type "shard" \
-      --train_data $data/$train_set/data.list \
-      --cv_data $data/$train_dev/data.list \
+      --data_type "raw" \
+      --train_data $data/$train_set\_data.list \
+      --cv_data $data/$dev_set\_data.list \
       ${checkpoint:+--checkpoint $checkpoint} \
       --model_dir $dir \
       --ddp.dist_backend $dist_backend \
       --num_workers 16 \
       --pin_memory \
+      --tensorboard_dir $tensorboard_dir \
       --deepspeed_config ${deepspeed_config} \
       --deepspeed.save_states ${deepspeed_save_states}
 fi
@@ -193,8 +204,8 @@ if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ]; then
     python wenet/bin/recognize.py --gpu 0 \
       --modes $decode_modes \
       --config $dir/train.yaml \
-      --data_type "shard" \
-      --test_data $data/$test/format.data \
+      --data_type "raw" \
+      --test_data $data/$recog_set\_data.list \
       --checkpoint $decode_checkpoint \
       --beam_size 20 \
       --batch_size 32 \
@@ -214,15 +225,15 @@ if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ]; then
       paste -d " " $test_dir/text_bpe_key_tmp $test_dir/text_value > $test_dir/text
       # a raw version wer without refining processs
       python tools/compute-wer.py --char=1 --v=1 \
-        $data/$test/text $test_dir/text > $test_dir/wer
+        $data/$test\_text $test_dir/text > $test_dir/wer
 
       # for gigaspeech scoring
       cat $test_dir/text_bpe_key_tmp | sed -e "s/^/(/g" | sed -e "s/$/)/g" > $test_dir/hyp_key
       paste -d " " $test_dir/text_value $test_dir/hyp_key > $test_dir/hyp
-      paste -d " " <(cut -f2- -d " " $data/$test/text) \
-        <(cut -f1 -d " " $data/$test/text | \
-        sed -e "s/^/(/g" | sed -e "s/$/)/g") > $data/$test/ref
-      local/gigaspeech_scoring.py $data/$test/ref $test_dir/hyp $test_dir
+      paste -d " " <(cut -f2- -d " " $data/$test\_text) \
+        <(cut -f1 -d " " $data/$test\_text | \
+        sed -e "s/^/(/g" | sed -e "s/$/)/g") > $data/$test\_ref
+      local/gigaspeech_scoring.py $data/$test\_ref $test_dir/hyp $test_dir
     done
   }
   done

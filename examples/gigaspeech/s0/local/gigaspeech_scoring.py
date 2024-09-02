@@ -68,5 +68,5 @@ if __name__ == '__main__':
                     uttid_field = cols[-1]
                     print(F'{text} {uttid_field}', file=fo)
 
-    os.system(F'sclite -r {REF} trn -h {HYP} trn -i swb | tee {RESULT}'
+    os.system(F'sctk sclite -r {REF} trn -h {HYP} trn -i swb | tee {RESULT}'
               )  # GigaSpeech's uttid comforms to swb
